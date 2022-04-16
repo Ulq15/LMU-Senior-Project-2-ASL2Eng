@@ -32,8 +32,8 @@ class ASLClassifier(nn.Module):
         super(ASLClassifier, self).__init__()
         input_size = num_features * num_labels * num_frames
         self.flatten = nn.Flatten()        
-        self.linear_relu_stack = nn.Sequential(
-            nn.Linear(input_size, 256),
+        self.resnet = nn.Sequential(
+            nn.Conv2d(input_size, 256),
             nn.ReLU(),
             nn.Linear(256,256),
             nn.ReLU(),
@@ -43,7 +43,7 @@ class ASLClassifier(nn.Module):
         )
 
     def forward(self, x):
-        logits = self.linear_relu_stack(x)
+        logits = self.resnet(x)
         return logits
 
 
