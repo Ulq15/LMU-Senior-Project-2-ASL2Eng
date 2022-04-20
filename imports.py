@@ -32,6 +32,8 @@ import csv
 import os.path as path
 import matplotlib.pyplot as plt
 
+from pytorch_lightning.core.optimizer import LightningOptimizer
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks import RichProgressBar, LearningRateMonitor, ModelCheckpoint
