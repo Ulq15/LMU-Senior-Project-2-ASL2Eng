@@ -146,7 +146,7 @@ def main():
     convert_everything_to_mp4()
     content = json.load(open('WLASL_v0.3.json'))
     extract_all_yt_instances(content)
-    
+
     video_path = os.path.join('data','videos')
     org_path = os.path.join('data','organized_vids')
     split_path = os.path.join('data','split_data')
@@ -155,7 +155,7 @@ def main():
 
     createCSV(split_path, 'test')
     createCSV(split_path, 'train')
-    
+
 
 if __name__=="__main__":
     main()
