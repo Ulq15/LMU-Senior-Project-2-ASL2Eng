@@ -130,3 +130,6 @@ dmypy.json
 
 data
 *.rar
+*.ckpt
+*.0
+*.yaml
