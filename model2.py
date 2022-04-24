@@ -1,16 +1,27 @@
+from gc import callbacks
 from imports import *
 import VideoResNet as VRN
 from typing import Tuple, Optional, Callable, List, Sequence, Type, Any, Union
+import warnings
+
+warnings.filterwarnings(
+    "ignore", ".*Trying to infer the `batch_size` from an ambiguous collection.*"
+)
+warnings.filterwarnings(
+    "ignore", ".*The dataloader, train_dataloader, does not have many workers which may be a bottleneck.*"
+)
 
 class ASLDataLM(pl.LightningDataModule):
 
     def __init__(self, data_path, batch_size, num_workers):
+        super().__init__()
         self.batch_size = batch_size
         self.data_path = data_path
         self.num_workers = num_workers      # Number of parallel processes fetching data
-        self.clip_length = 1                # Duration of sampled clip for each video
+        self.clip_length = 3                # Duration of sampled clip for each video
         self.vocab = None
         self.onehot = preprocessing.OneHotEncoder(sparse=False)
+        self.save_hyperparameters()
 
     def setup(self, stage=None):
         # Assign Train/val split(s) for use in Dataloaders
@@ -47,6 +58,7 @@ class ASLDataLM(pl.LightningDataModule):
                             UniformTemporalSubsample(8),
                             Lambda(lambda x: x / 255.0),
                             Normalize((0.45, 0.45, 0.45),(0.225, 0.225, 0.225)),
+                            ShortSideScale(256)
                         ]
                     ),
                 ),
@@ -85,6 +97,7 @@ class ASLDataLM(pl.LightningDataModule):
 
     def load_vocab(self, csv_name):
         pklPath = './savedVars/vocab.pkl'
+        oneHotPath = './savedVars/onehot.pkl'
         if path.exists(pklPath):
             with open(pklPath,'rb') as f:
                 self.vocab = pkl.load(f)
@@ -98,8 +111,14 @@ class ASLDataLM(pl.LightningDataModule):
                         self.vocab.append(label)
             with open(pklPath, 'xb') as file:
                 pkl.dump(self.vocab, file)
-        arr = np.array(self.vocab).reshape(-1, 1)
-        self.onehot.fit(arr)
+        if path.exists(oneHotPath):
+            with open(oneHotPath, 'rb') as f:
+                self.onehot = pkl.load(f)
+        else:
+            arr = np.array(self.vocab).reshape(-1, 1)
+            self.onehot.fit(arr)
+            with open(oneHotPath, 'xb') as file:
+                pkl.dump(self.onehot, file)
 
 
 
@@ -107,6 +126,7 @@ class ASLClassifierLM(pl.LightningModule):
     def __init__(self):
         super().__init__()
         self.accuracy = metrics.Accuracy()
+        self.learning_rate = 1e-2
         block=VRN.BasicBlock
         conv_makers=[VRN.Conv2Plus1D] * 4
         layers=[2, 2, 2, 2]
@@ -143,7 +163,7 @@ class ASLClassifierLM(pl.LightningModule):
                 if isinstance(m, VRN.Bottleneck):
                     nn.init.constant_(m.bn3.weight, 0)  # type: ignore[union-attr, arg-type]
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         x = self.stem(x)
 
         x = self.layer1(x)
@@ -186,7 +206,7 @@ class ASLClassifierLM(pl.LightningModule):
         # We will support Adam or SGD as optimizers.
         # if self.hparams.optimizer_name == "Adam":
         # AdamW is Adam with a correct implementation of weight decay
-        optimizer = optim.AdamW(self.parameters(), lr=1e-3)
+        optimizer = optim.AdamW(self.parameters(), lr=self.learning_rate)
         # return optimizer
         scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1, verbose=True)
         return [optimizer], [scheduler]
@@ -195,32 +215,30 @@ class ASLClassifierLM(pl.LightningModule):
         # "batch" is the output of the training data loader.
         vid_input:Tensor = batch['video']
         label_vect:Tensor = batch['label']
-        label:str = batch['word']
+        # label:str = batch['word']
         preds:Tensor = self(vid_input)
         # print((label, label_vect.argmax(dim=-1), preds.argmax(dim=-1)))
         loss:Tensor = F.cross_entropy(preds, label_vect)
         self.accuracy(preds, label_vect.argmax(dim=-1))
         # Logs the accuracy per epoch to tensorboard (weighted average over batches)
-        self.log("train_acc_step", self.accuracy)
+        self.log("train_acc_step", self.accuracy, on_epoch=False, on_step=True)
         self.log("train_loss", loss, on_step=True, on_epoch=True)
+        self.log("train_acc_epoch", self.accuracy, on_epoch=True, on_step=False)
         return loss
 
     def test_step(self, batch, batch_idx):
         vid_input:Tensor = batch['video']
         label_vect:Tensor = batch['label']
-        label:str = batch['word']
+        # label:str = batch['word']
         preds:Tensor = self(vid_input)
         test_loss:Tensor = F.cross_entropy(preds, label_vect)
         self.log("test_loss", test_loss)
         self.accuracy(preds, label_vect)
         # By default logs it per epoch (weighted average over batches), and returns it afterwards
         self.log("test_acc", self.accuracy)
+        self.log('test_acc_epoch', self.accuracy)
 
-    def training_epoch_end(self):
-        # log epoch metric
-        self.log('train_acc_epoch', self.accuracy)
-
-    def backward(self, loss: torch.Tensor, optimizer: Optional[optim.Optimizer], optimizer_idx: Optional[int], *args, **kwargs) -> None:
+    def backward(self, loss: Tensor, optimizer: Optional[optim.Optimizer], optimizer_idx: Optional[int], *args, **kwargs) -> None:
         return super().backward(loss, optimizer, optimizer_idx, *args, **kwargs)
 
     def optimizer_step(self, epoch: int, batch_idx: int, optimizer: Union[optim.Optimizer, LightningOptimizer], optimizer_idx: int = 0, optimizer_closure: Optional[Callable[[], Any]] = None, on_tpu: bool = False, using_native_amp: bool = False, using_lbfgs: bool = False) -> None:
@@ -251,16 +269,15 @@ def main():
     # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # print(f"Using {device}")
 
-    batch_size = 4
+    batch_size = 8
 
     data_path = path.join('data', 'split_data')
-    dataModule = ASLDataLM(data_path, batch_size, num_workers=20)
-
+    dataModule = ASLDataLM(data_path, batch_size, 8)
 
     model = ASLClassifierLM()
     es = EarlyStopping(monitor="train_loss", mode="min", check_on_train_epoch_end=True)
-    # reload_dataloaders_every_epoch=False, auto_select_gpus=True,
-    trainer = Trainer(max_steps=200, enable_checkpointing=True, gpus=1, callbacks=[es], accelerator="gpu", auto_lr_find=True, default_root_dir='./stateSaves/')
+    # auto_select_gpus=True,
+    trainer = Trainer(max_epochs=10, callbacks=[es], enable_checkpointing=True,  gpus=1, accelerator="gpu", auto_lr_find='learning_rate', default_root_dir='./stateSaves/')
     trainer.fit(model=model, datamodule=dataModule)#, ckpt_path='./stateSaves/')
     trainer.save_checkpoint("fit#2.ckpt")
     # trainer.test(model, dataModule)
