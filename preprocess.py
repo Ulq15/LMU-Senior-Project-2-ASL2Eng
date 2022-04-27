@@ -16,17 +16,23 @@ def video_to_frames(video_path, size=None):
     video_path -> str, path to video.
     size -> (int, int), width, height.
     """
-    cap = cv2.VideoCapture(video_path)
+
+    videoSRC = cv2.VideoCapture(video_path)
     frames = []
     while True:
-        ret, frame = cap.read()
+        ret, frame = videoSRC.read()
         if ret:
-            if size:
-                frame = cv2.resize(frame, size)
-            frames.append(frame)
+            height, width, layers = frame.shape
+            if size is None:
+                scale = 256
+                ratio = float(height)/scale
+                size = (int(width/ratio), int(height/ratio))
+            resized = cv2.resize(frame, size)
+            grayed = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+            frames.append(grayed)
         else:
             break
-    cap.release()
+    videoSRC.release()
     return frames
 
 
@@ -84,28 +90,35 @@ def extract_all_yt_instances(content):
                 if not os.path.exists(src_video_path):
                     continue
                 print(cnt, dst_video_path)
-                shutil.copyfile(src_video_path, dst_video_path)
+                # shutil.copyfile(src_video_path, dst_video_path)
+                frames = video_to_frames(src_video_path)
+                convert_frames_to_video(frames, dst_video_path, frames[0].shape[:2][::-1])
 
 
 def organizeFS(content, video_path, path_out):
     if not os.path.exists(path_out):
         os.mkdir(path_out)
+        os.mkdir(os.path.join(path_out, 'train'))
+        os.mkdir(os.path.join(path_out, 'test'))
+        os.mkdir(os.path.join(path_out, 'val'))
     for entry in content:
         instances = entry['instances']
         word = entry['gloss']
-        if not os.path.exists(os.path.join(path_out, word)):
-            os.mkdir(os.path.join(path_out, word))
         for inst in instances:
             video_id = inst['video_id']
+            split = inst['split']
             src_path = os.path.join(video_path, video_id + '.mp4')
             if not os.path.exists(src_path):
                 print(f'Did not find video id:{video_id} for word \'{word}\'.\n')
                 continue
-            dst_path = os.path.join(path_out, word, video_id + '.mp4')
+            dst_path = os.path.join(path_out, split, video_id + '.mp4')
             if os.path.exists(dst_path):
                 print(f'Found video id:{video_id} for word \'{word}\' already in destination.\n')
                 continue
             shutil.move(src_path, dst_path)
+            with open(os.path.join(path_out, split+'.csv'), 'a+', encoding='UTF8', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow([dst_path, word])
     if os.path.isdir(video_path) and len(os.listdir(video_path)) == 0:
         os.rmdir(video_path)
 
@@ -113,10 +126,12 @@ def organizeFS(content, video_path, path_out):
 def train_test_split(src_path, dst_path, ratio):
     train_path = os.path.join(dst_path, 'train')
     test_path = os.path.join(dst_path, 'test')
+    val_path = os.path.join(dst_path, 'val')
     if not os.path.exists(dst_path):
         os.mkdir(dst_path)
         os.mkdir(train_path)
         os.mkdir(test_path)
+        os.mkdir(val_path)
     for folder in os.listdir(src_path):
         word = folder
         video_path = os.path.join(src_path, word)
@@ -124,6 +139,8 @@ def train_test_split(src_path, dst_path, ratio):
             os.mkdir(os.path.join(train_path, word))
         if not os.path.exists(os.path.join(test_path, word)):
             os.mkdir(os.path.join(test_path, word))
+        if not os.path.exists(os.path.join(val_path, word)):
+            os.mkdir(os.path.join(val_path, word))
         videos = [f for f in os.listdir(video_path)]
         count = len(videos)
         num_Vidtest = ceil(count * ratio)
@@ -143,18 +160,18 @@ def createCSV(dir_path, csv_name):
 
 
 def main():
-    convert_everything_to_mp4()
+    # convert_everything_to_mp4()
     content = json.load(open('WLASL_v0.3.json'))
     extract_all_yt_instances(content)
 
     video_path = os.path.join('data','videos')
-    org_path = os.path.join('data','organized_vids')
+    # org_path = os.path.join('data','organized_vids')
     split_path = os.path.join('data','split_data')
-    organizeFS(content, video_path, org_path)
-    train_test_split(org_path, split_path, 0.2)
+    organizeFS(content, video_path, split_path)
+    # train_test_split(org_path, split_path, 0.2)
 
-    createCSV(split_path, 'test')
-    createCSV(split_path, 'train')
+    # createCSV(split_path, 'test')
+    # createCSV(split_path, 'train')
 
 
 if __name__=="__main__":

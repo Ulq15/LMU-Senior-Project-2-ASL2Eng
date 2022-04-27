@@ -194,7 +194,7 @@ class VideoResNet(nn.Module):
         conv_makers: Sequence[Type[Union[Conv3DSimple, Conv3DNoTemporal, Conv2Plus1D]]],
         layers: List[int],
         stem: Callable[..., nn.Module],
-        num_classes: int = 2000,
+        num_classes: int = 400,
         zero_init_residual: bool = False,
     ) -> None:
         """Generic resnet video generator.

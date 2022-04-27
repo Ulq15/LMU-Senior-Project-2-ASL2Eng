@@ -25,7 +25,8 @@ class ASLDataLM(pl.LightningDataModule):
 
     def setup(self, stage=None):
         # Assign Train/val split(s) for use in Dataloaders
-        if stage in (None, "fit", "validate"):
+        # print(stage)
+        if stage in (None, "fit"):
             train_transform = Compose([
                 ApplyTransformToKey(
                     key="video",
@@ -35,7 +36,7 @@ class ASLDataLM(pl.LightningDataModule):
                             Lambda(lambda x: x / 255.0),
                             Normalize((0.45, 0.45, 0.45),(0.225, 0.225, 0.225)),
                             RandomShortSideScale(min_size=256, max_size=320),
-                            RandomCrop(244),
+                            # RandomCrop(244),
                             RandomHorizontalFlip(p=0.5),
                         ]
                     ),
@@ -48,8 +49,31 @@ class ASLDataLM(pl.LightningDataModule):
                 decode_audio=False,
             )
 
+        # if stage in (None, "validate"):
+        #     val_transform = Compose([
+        #         ApplyTransformToKey(
+        #             key="video",
+        #             transform=Compose(
+        #                 [
+        #                     UniformTemporalSubsample(8),
+        #                     Lambda(lambda x: x / 255.0),
+        #                     Normalize((0.45, 0.45, 0.45),(0.225, 0.225, 0.225)),
+        #                     RandomShortSideScale(min_size=256, max_size=320),
+        #                     # RandomCrop(244),
+        #                     RandomHorizontalFlip(p=0.5),
+        #                 ]
+        #             ),
+        #         ),
+        #     ])
+        #     self.val_dataset = LVDS(
+        #         labeled_video_paths=self._load_csv(self.data_path+'\\val.csv'),
+        #         clip_sampler=UCS(clip_duration=self.clip_length),
+        #         transform=val_transform,
+        #         decode_audio=False,
+        #     )
+
         # Assign Test split(s) for use in Dataloaders
-        if stage in (None, "test", "predict"):
+        if stage in (None, "test"):
             test_transform = Compose([
                 ApplyTransformToKey(
                     key="video",
@@ -72,6 +96,9 @@ class ASLDataLM(pl.LightningDataModule):
 
     def train_dataloader(self):
         return DATA.DataLoader(self.train_dataset, batch_size=self.batch_size)
+
+    # def val_dataloader(self):
+    #     return DATA.DataLoader(self.val_dataset, batch_size=self.batch_size)
 
     def test_dataloader(self):
         return DATA.DataLoader(self.test_dataset, batch_size=self.batch_size)
@@ -123,102 +150,108 @@ class ASLDataLM(pl.LightningDataModule):
 
 
 class ASLClassifierLM(pl.LightningModule):
-    def __init__(self):
+    def __init__(self, loss, optimizer=None):
         super().__init__()
         self.accuracy = metrics.Accuracy()
-        self.learning_rate = 1e-2
-        block=VRN.BasicBlock
-        conv_makers=[VRN.Conv2Plus1D] * 4
-        layers=[2, 2, 2, 2]
-        num_classes = 2000
-        zero_init_residual = False
+        self.learning_rate = 1e-1
+        self.loss_fn = loss
+        self.optimizer = optimizer
+        self.model = VRN.r2plus1d_18(num_classes=2000)
+        # block=VRN.BasicBlock
+        # conv_makers=[VRN.Conv2Plus1D] * 4
+        # layers=[2, 2, 2, 2]
+        # num_classes = 2000
+        # zero_init_residual = False
 
-        self.inplanes = 64
+        # self.inplanes = 64
 
-        self.stem = VRN.R2Plus1dStem()
+        # self.stem = VRN.R2Plus1dStem()
 
-        self.layer1 = self._make_layer(block, conv_makers[0], 64, layers[0], stride=1)
-        self.layer2 = self._make_layer(block, conv_makers[1], 128, layers[1], stride=2)
-        self.layer3 = self._make_layer(block, conv_makers[2], 256, layers[2], stride=2)
-        self.layer4 = self._make_layer(block, conv_makers[3], 512, layers[3], stride=2)
+        # self.layer1 = self._make_layer(block, conv_makers[0], 64, layers[0], stride=1)
+        # self.layer2 = self._make_layer(block, conv_makers[1], 128, layers[1], stride=2)
+        # self.layer3 = self._make_layer(block, conv_makers[2], 256, layers[2], stride=2)
+        # self.layer4 = self._make_layer(block, conv_makers[3], 512, layers[3], stride=2)
 
-        self.avgpool = nn.AdaptiveAvgPool3d((1, 1, 1))
-        self.fc = nn.Linear(512 * block.expansion, num_classes)
+        # self.avgpool = nn.AdaptiveAvgPool3d((1, 1, 1))
+        # self.fc = nn.Linear(512 * block.expansion, num_classes)
 
-        # init weights
-        for m in self.modules():
-            if isinstance(m, nn.Conv3d):
-                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.BatchNorm3d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, 0, 0.01)
-                nn.init.constant_(m.bias, 0)
+        # # init weights
+        # for m in self.modules():
+        #     if isinstance(m, nn.Conv3d):
+        #         nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+        #         if m.bias is not None:
+        #             nn.init.constant_(m.bias, 0)
+        #     elif isinstance(m, nn.BatchNorm3d):
+        #         nn.init.constant_(m.weight, 1)
+        #         nn.init.constant_(m.bias, 0)
+        #     elif isinstance(m, nn.Linear):
+        #         nn.init.normal_(m.weight, 0, 0.01)
+        #         nn.init.constant_(m.bias, 0)
 
-        if zero_init_residual:
-            for m in self.modules():
-                if isinstance(m, VRN.Bottleneck):
-                    nn.init.constant_(m.bn3.weight, 0)  # type: ignore[union-attr, arg-type]
+        # if zero_init_residual:
+        #     for m in self.modules():
+        #         if isinstance(m, VRN.Bottleneck):
+        #             nn.init.constant_(m.bn3.weight, 0)  # type: ignore[union-attr, arg-type]
+
 
     def forward(self, x: Tensor) -> Tensor:
-        x = self.stem(x)
+        # x = self.stem(x)
 
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
+        # x = self.layer1(x)
+        # x = self.layer2(x)
+        # x = self.layer3(x)
+        # x = self.layer4(x)
 
-        x = self.avgpool(x)
-        # Flatten the layer to fc
-        x = x.flatten(1)
-        x = self.fc(x)
-        return x
+        # x = self.avgpool(x)
+        # # Flatten the layer to fc
+        # x = x.flatten(1)
+        # x = self.fc(x)
+        # return x
+        logits = self.model(x)
+        return logits
 
-    def _make_layer(
-        self,
-        block: Type[Union[VRN.BasicBlock, VRN.Bottleneck]],
-        conv_builder: Type[Union[VRN.Conv3DSimple, VRN.Conv3DNoTemporal, VRN.Conv2Plus1D]],
-        planes: int,
-        blocks: int,
-        stride: int = 1,
-    ) -> nn.Sequential:
-        downsample = None
+    # def _make_layer(
+    #     self,
+    #     block: Type[Union[VRN.BasicBlock, VRN.Bottleneck]],
+    #     conv_builder: Type[Union[VRN.Conv3DSimple, VRN.Conv3DNoTemporal, VRN.Conv2Plus1D]],
+    #     planes: int,
+    #     blocks: int,
+    #     stride: int = 1,
+    # ) -> nn.Sequential:
+    #     downsample = None
 
-        if stride != 1 or self.inplanes != planes * block.expansion:
-            ds_stride = conv_builder.get_downsample_stride(stride)
-            downsample = nn.Sequential(
-                nn.Conv3d(self.inplanes, planes * block.expansion, kernel_size=1, stride=ds_stride, bias=False),
-                nn.BatchNorm3d(planes * block.expansion),
-            )
-        layers = []
-        layers.append(block(self.inplanes, planes, conv_builder, stride, downsample))
+    #     if stride != 1 or self.inplanes != planes * block.expansion:
+    #         ds_stride = conv_builder.get_downsample_stride(stride)
+    #         downsample = nn.Sequential(
+    #             nn.Conv3d(self.inplanes, planes * block.expansion, kernel_size=1, stride=ds_stride, bias=False),
+    #             nn.BatchNorm3d(planes * block.expansion),
+    #         )
+    #     layers = []
+    #     layers.append(block(self.inplanes, planes, conv_builder, stride, downsample))
 
-        self.inplanes = planes * block.expansion
-        for i in range(1, blocks):
-            layers.append(block(self.inplanes, planes, conv_builder))
+    #     self.inplanes = planes * block.expansion
+    #     for i in range(1, blocks):
+    #         layers.append(block(self.inplanes, planes, conv_builder))
 
-        return nn.Sequential(*layers)
+    #     return nn.Sequential(*layers)
 
     def configure_optimizers(self):
         # We will support Adam or SGD as optimizers.
         # if self.hparams.optimizer_name == "Adam":
         # AdamW is Adam with a correct implementation of weight decay
-        optimizer = optim.AdamW(self.parameters(), lr=self.learning_rate)
+        self.optimizer = optim.AdamW(self.model.parameters(), lr=self.learning_rate)
         # return optimizer
-        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1, verbose=True)
-        return [optimizer], [scheduler]
+        scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=10, gamma=0.1, verbose=True)
+        return [self.optimizer], [scheduler]
 
     def training_step(self, batch, batch_idx):
         # "batch" is the output of the training data loader.
         vid_input:Tensor = batch['video']
         label_vect:Tensor = batch['label']
         # label:str = batch['word']
-        preds:Tensor = self(vid_input)
+        preds:Tensor = self.model(vid_input)
         # print((label, label_vect.argmax(dim=-1), preds.argmax(dim=-1)))
-        loss:Tensor = F.cross_entropy(preds, label_vect)
+        loss:Tensor = self.loss_fn(preds, label_vect)
         self.accuracy(preds, label_vect.argmax(dim=-1))
         # Logs the accuracy per epoch to tensorboard (weighted average over batches)
         self.log("train_acc_step", self.accuracy, on_epoch=False, on_step=True)
@@ -230,7 +263,7 @@ class ASLClassifierLM(pl.LightningModule):
         vid_input:Tensor = batch['video']
         label_vect:Tensor = batch['label']
         # label:str = batch['word']
-        preds:Tensor = self(vid_input)
+        preds:Tensor = self.model(vid_input)
         test_loss:Tensor = F.cross_entropy(preds, label_vect)
         self.log("test_loss", test_loss)
         self.accuracy(preds, label_vect)
@@ -247,10 +280,10 @@ class ASLClassifierLM(pl.LightningModule):
     # def validation_step(self, batch, batch_idx):
     #     vid_input:Tensor = batch['video']
     #     label_vect:Tensor = batch['label']
-    #     label:str = batch['word']
-    #     preds:Tensor = self(vid_input)
-    #     test_loss:Tensor = F.cross_entropy(preds, label_vect)
-    #     self.log("val_loss", test_loss)
+    #     # label:str = batch['word']
+    #     preds:Tensor = self.model(vid_input)
+    #     val_loss:Tensor = F.cross_entropy(preds, label_vect)
+    #     self.log("val_loss", val_loss)
     #     self.accuracy(preds, label_vect)
     #     # By default logs it per epoch (weighted average over batches), and returns it afterwards
     #     self.log("val_acc", self.accuracy, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
@@ -273,8 +306,10 @@ def main():
 
     data_path = path.join('data', 'split_data')
     dataModule = ASLDataLM(data_path, batch_size, 8)
-
-    model = ASLClassifierLM()
+    loss_fn = nn.CrossEntropyLoss()
+    # model = ASLClassifierLM(loss_fn)
+    model_name = 'i3d_r50'
+    model = torch.hub.load("facebookresearch/pytorchvideo:main", model=model_name, pretrained=False, model_depth=101, model_num_class=2000)
     es = EarlyStopping(monitor="train_loss", mode="min", check_on_train_epoch_end=True)
     # auto_select_gpus=True,
     trainer = Trainer(max_epochs=10, callbacks=[es], enable_checkpointing=True,  gpus=1, accelerator="gpu", auto_lr_find='learning_rate', default_root_dir='./stateSaves/')
