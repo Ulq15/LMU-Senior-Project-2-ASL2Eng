@@ -1,10 +1,11 @@
 import os
+import os.path as path
 import json
 
 
-filenames = set(os.listdir('data/videos'))
-
-content = json.load(open('data/WLASL_v0.3.json'))
+filenames = set(os.listdir(path.join(os.pardir, 'data/videos')))
+jsonFile = path.join(os.path.dirname(__file__), 'WLASL_v0.3.json')
+content = json.load(open(jsonFile))
 
 missing_ids = []
 
@@ -17,6 +18,6 @@ for entry in content:
             missing_ids.append(video_id)
 
 
-with open('data/missing.txt', 'w') as f:
+with open(path.join(os.path.dirname(__file__),'data/missing.txt'), 'w') as f:
     f.write('\n'.join(missing_ids))
 

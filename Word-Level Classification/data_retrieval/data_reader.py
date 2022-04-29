@@ -1,6 +1,8 @@
 import json
+import os
+import os.path as path
 
-file_path = 'data/WLASL_v0.3.json'
+file_path = path.join(os.path.dirname(__file__), 'WLASL_v0.3.json')
 
 with open(file_path) as ipf:
     content = json.load(ipf)

@@ -1,14 +1,15 @@
+from asyncio.subprocess import PIPE
 import os
 import json
 import time
 import sys
 import urllib.request
 from multiprocessing.dummy import Pool
-
+import subprocess
 import random
 
 import logging
-logging.basicConfig(filename='download_{}.log'.format(int(time.time())), filemode='w', level=logging.DEBUG)
+logging.basicConfig(filename='{}/logs/download_{}.log'.format(os.path.dirname(__file__),int(time.time())), filemode='w', level=logging.DEBUG)
 logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
 
 
@@ -44,7 +45,7 @@ def download_aslpro(url, dirname, video_id):
     saveto = os.path.join(dirname, '{}.swf'.format(video_id))
     if os.path.exists(saveto):
         logging.info('{} exists at {}'.format(video_id, saveto))
-        return 
+        return
 
     data = request_video(url, referer='http://www.aslpro.com/cgi-bin/aslpro/aslpro.cgi')
     save_video(data, saveto)
@@ -98,16 +99,15 @@ def download_nonyt_videos(indexfile, saveto='data/raw_videos'):
 
 
 def check_youtube_dl_version():
-    youtube = os.path.join(os.getcwd(), 'youtube-dl.exe')
-    ver = os.popen(youtube+' --version').read()
-
+    # youtube = os.path.join(os.path.dirname(__file__), 'youtube-dl.exe')
+    ver = os.popen('\"{}\" --version'.format(youtube)).read()
     assert ver, "youtube-dl cannot be found in PATH. Please verify your installation."
     assert ver >= '2020.03.08', "Please update youtube-dl to newest version."
 
 
 def download_yt_videos(indexfile, saveto='data/raw_videos'):
     content = json.load(open(indexfile))
-    youtube = os.path.join(os.getcwd(), 'youtube-dl.exe')
+    # youtube = os.path.join(os.path.dirname(__file__), 'youtube-dl.exe')
     if not os.path.exists(saveto):
         os.mkdir(saveto)
 
@@ -126,12 +126,17 @@ def download_yt_videos(indexfile, saveto='data/raw_videos'):
                 logging.info('YouTube videos {} already exists.'.format(video_url))
                 continue
             else:
-                cmd = "& \"{}\" --no-mark-watched \"{}\" -o \"{}%(id)s.%(ext)s\""
-                cmd = cmd.format(youtube, video_url, saveto + os.path.sep)
+                cmd = '--no-mark-watched \"{}\" -o \"{}%(id)s.%(ext)s\"'
+                cmd = cmd.format(video_url, saveto + os.path.sep)
+                with open("stderr.txt","w") as err:
+                    rv = subprocess.Popen(args=cmd, stderr=err, executable=youtube).returncode
+                with open("stderr.txt","r") as f:
+                    line = f.readline()
+                    error = False
+                    if line.find('ERR')>=0:
+                        error = True
 
-                rv = os.system(cmd)
-
-                if not rv:
+                if not error:
                     logging.info('Finish downloading youtube video url {}'.format(video_url))
                 else:
                     logging.error('Unsuccessful downloading - youtube video url {}'.format(video_url))
@@ -142,9 +147,9 @@ def download_yt_videos(indexfile, saveto='data/raw_videos'):
 
 if __name__ == '__main__':
     logging.info('Start downloading non-youtube videos.')
-    download_nonyt_videos('data/WLASL_v0.3.json')
-
+    #download_nonyt_videos('./WLASL_v0.3.json')
+    youtube = os.path.join(os.path.dirname(__file__), 'youtube-dl.exe')
     check_youtube_dl_version()
     logging.info('Start downloading youtube videos.')
-    download_yt_videos('data/WLASL_v0.3.json')
+    download_yt_videos('./WLASL_v0.3.json')
 
